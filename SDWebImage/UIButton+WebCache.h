@@ -7,6 +7,9 @@
  */
 
 #import "SDWebImageCompat.h"
+
+#if SD_UIKIT
+
 #import "SDWebImageManager.h"
 
 /**
@@ -18,6 +21,8 @@
  * Get the current image URL.
  */
 - (nullable NSURL *)sd_currentImageURL;
+
+#pragma mark - Image
 
 /**
  * Get the image URL for a control state.
@@ -123,6 +128,8 @@
                    options:(SDWebImageOptions)options
                  completed:(nullable SDExternalCompletionBlock)completedBlock;
 
+#pragma mark - Background image
+
 /**
  * Set the backgroundImageView `image` with an `url`.
  *
@@ -219,6 +226,8 @@
                              options:(SDWebImageOptions)options
                            completed:(nullable SDExternalCompletionBlock)completedBlock;
 
+#pragma mark - Cancel
+
 /**
  * Cancel the current image download
  */
@@ -230,3 +239,5 @@
 - (void)sd_cancelBackgroundImageLoadForState:(UIControlState)state;
 
 @end
+
+#endif

@@ -68,7 +68,7 @@ typedef void(^SDWebImagePrefetcherCompletionBlock)(NSUInteger noOfFinishedUrls, 
 /**
  * Return the global image prefetcher instance.
  */
-+ (nonnull SDWebImagePrefetcher *)sharedImagePrefetcher;
++ (nonnull instancetype)sharedImagePrefetcher;
 
 /**
  * Allows you to instantiate a prefetcher with any arbitrary image manager.
@@ -78,7 +78,8 @@ typedef void(^SDWebImagePrefetcherCompletionBlock)(NSUInteger noOfFinishedUrls, 
 /**
  * Assign list of URLs to let SDWebImagePrefetcher to queue the prefetching,
  * currently one image is downloaded at a time,
- * and skips images for failed downloads and proceed to the next image in the list
+ * and skips images for failed downloads and proceed to the next image in the list.
+ * Any previously-running prefetch operations are canceled.
  *
  * @param urls list of URLs to prefetch
  */
@@ -87,7 +88,8 @@ typedef void(^SDWebImagePrefetcherCompletionBlock)(NSUInteger noOfFinishedUrls, 
 /**
  * Assign list of URLs to let SDWebImagePrefetcher to queue the prefetching,
  * currently one image is downloaded at a time,
- * and skips images for failed downloads and proceed to the next image in the list
+ * and skips images for failed downloads and proceed to the next image in the list.
+ * Any previously-running prefetch operations are canceled.
  *
  * @param urls            list of URLs to prefetch
  * @param progressBlock   block to be called when progress updates; 

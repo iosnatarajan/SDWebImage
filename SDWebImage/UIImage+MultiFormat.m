@@ -23,31 +23,33 @@
     }
     
     UIImage *image;
-    NSString *imageContentType = [NSData sd_contentTypeForImageData:data];
-    if ([imageContentType isEqualToString:@"image/gif"]) {
+    SDImageFormat imageFormat = [NSData sd_imageFormatForImageData:data];
+    if (imageFormat == SDImageFormatGIF) {
         image = [UIImage sd_animatedGIFWithData:data];
     }
 #ifdef SD_WEBP
-    else if ([imageContentType isEqualToString:@"image/webp"])
+    else if (imageFormat == SDImageFormatWebP)
     {
         image = [UIImage sd_imageWithWebPData:data];
     }
 #endif
     else {
         image = [[UIImage alloc] initWithData:data];
+#if SD_UIKIT || SD_WATCH
         UIImageOrientation orientation = [self sd_imageOrientationFromImageData:data];
         if (orientation != UIImageOrientationUp) {
             image = [UIImage imageWithCGImage:image.CGImage
                                         scale:image.scale
                                   orientation:orientation];
         }
+#endif
     }
 
 
     return image;
 }
 
-
+#if SD_UIKIT || SD_WATCH
 +(UIImageOrientation)sd_imageOrientationFromImageData:(nonnull NSData *)imageData {
     UIImageOrientation result = UIImageOrientationUp;
     CGImageSourceRef imageSource = CGImageSourceCreateWithData((__bridge CFDataRef)imageData, NULL);
@@ -112,7 +114,48 @@
     }
     return orientation;
 }
+#endif
 
+- (nullable NSData *)sd_imageData {
+    return [self sd_imageDataAsFormat:SDImageFormatUndefined];
+}
+
+- (nullable NSData *)sd_imageDataAsFormat:(SDImageFormat)imageFormat {
+    NSData *imageData = nil;
+    if (self) {
+#if SD_UIKIT || SD_WATCH
+        int alphaInfo = CGImageGetAlphaInfo(self.CGImage);
+        BOOL hasAlpha = !(alphaInfo == kCGImageAlphaNone ||
+                          alphaInfo == kCGImageAlphaNoneSkipFirst ||
+                          alphaInfo == kCGImageAlphaNoneSkipLast);
+        
+        BOOL usePNG = hasAlpha;
+        
+        // the imageFormat param has priority here. But if the format is undefined, we relly on the alpha channel
+        if (imageFormat != SDImageFormatUndefined) {
+            usePNG = (imageFormat == SDImageFormatPNG);
+        }
+        
+        if (usePNG) {
+            imageData = UIImagePNGRepresentation(self);
+        } else {
+            imageData = UIImageJPEGRepresentation(self, (CGFloat)1.0);
+        }
+#else
+        NSBitmapImageFileType imageFileType = NSJPEGFileType;
+        if (imageFormat == SDImageFormatGIF) {
+            imageFileType = NSGIFFileType;
+        } else if (imageFormat == SDImageFormatPNG) {
+            imageFileType = NSPNGFileType;
+        }
+        
+        imageData = [NSBitmapImageRep representationOfImageRepsInArray:self.representations
+                                                             usingType:imageFileType
+                                                            properties:@{}];
+#endif
+    }
+    return imageData;
+}
 
 
 @end

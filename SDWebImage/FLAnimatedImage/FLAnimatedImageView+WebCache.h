@@ -6,11 +6,14 @@
  * file that was distributed with this source code.
  */
 
+#import "SDWebImageCompat.h"
 
-#if COCOAPODS
-    @import FLAnimatedImage;
+#if SD_UIKIT
+
+#if __has_include(<FLAnimatedImage/FLAnimatedImage.h>)
+#import <FLAnimatedImage/FLAnimatedImage.h>
 #else
-    #import "FLAnimatedImageView.h"
+#import "FLAnimatedImageView.h"
 #endif
 
 #import "SDWebImageManager.h"
@@ -21,14 +24,6 @@
  *  Very similar to the base class category (UIImageView (WebCache))
  */
 @interface FLAnimatedImageView (WebCache)
-
-/**
- * Get the current image URL.
- *
- * Note that because of the limitations of categories this property can get out of sync
- * if you use setImage: directly.
- */
-- (nullable NSURL *)sd_imageURL;
 
 /**
  * Load the image at the given url (either from cache or download) and load it in this imageView. It works with both static and dynamic images
@@ -121,6 +116,7 @@
  *  @param placeholder    The image to be set initially, until the image request finishes.
  *  @param options        The options to use when downloading the image. @see SDWebImageOptions for the possible values.
  *  @param progressBlock  A block called while image is downloading
+ *                        @note the progress block is executed on a background queue
  *  @param completedBlock A block called when operation has been completed. This block has no return value
  *                        and takes the requested UIImage as first parameter. In case of error the image parameter
  *                        is nil and the second parameter may contain an NSError. The third parameter is a Boolean
@@ -133,9 +129,6 @@
                   progress:(nullable SDWebImageDownloaderProgressBlock)progressBlock
                  completed:(nullable SDExternalCompletionBlock)completedBlock;
 
-/**
- * Cancel the image load
- */
-- (void)sd_cancelCurrentImageLoad;
-
 @end
+
+#endif

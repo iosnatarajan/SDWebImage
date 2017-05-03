@@ -54,7 +54,7 @@
     }
 }
 
-+ (nonnull SDWebImageDownloader *)sharedDownloader {
++ (nonnull instancetype)sharedDownloader {
     static dispatch_once_t once;
     static id instance;
     dispatch_once(&once, ^{
@@ -64,12 +64,17 @@
 }
 
 - (nonnull instancetype)init {
+    return [self initWithSessionConfiguration:[NSURLSessionConfiguration defaultSessionConfiguration]];
+}
+
+- (nonnull instancetype)initWithSessionConfiguration:(nullable NSURLSessionConfiguration *)sessionConfiguration {
     if ((self = [super init])) {
         _operationClass = [SDWebImageDownloaderOperation class];
         _shouldDecompressImages = YES;
         _executionOrder = SDWebImageDownloaderFIFOExecutionOrder;
         _downloadQueue = [NSOperationQueue new];
         _downloadQueue.maxConcurrentOperationCount = 6;
+        _downloadQueue.name = @"com.hackemist.SDWebImageDownloader";
         _URLOperations = [NSMutableDictionary new];
 #ifdef SD_WEBP
         _HTTPHeaders = [@{@"Accept": @"image/webp,image/*;q=0.8"} mutableCopy];
@@ -79,15 +84,14 @@
         _barrierQueue = dispatch_queue_create("com.hackemist.SDWebImageDownloaderBarrierQueue", DISPATCH_QUEUE_CONCURRENT);
         _downloadTimeout = 15.0;
 
-        NSURLSessionConfiguration *sessionConfig = [NSURLSessionConfiguration defaultSessionConfiguration];
-        sessionConfig.timeoutIntervalForRequest = _downloadTimeout;
+        sessionConfiguration.timeoutIntervalForRequest = _downloadTimeout;
 
         /**
          *  Create the session for this task
          *  We send nil as delegate queue so that the session creates a serial operation queue for performing all delegate
          *  method calls and completion handler calls.
          */
-        self.session = [NSURLSession sessionWithConfiguration:sessionConfig
+        self.session = [NSURLSession sessionWithConfiguration:sessionConfiguration
                                                      delegate:self
                                                 delegateQueue:nil];
     }
@@ -128,7 +132,11 @@
 }
 
 - (void)setOperationClass:(nullable Class)operationClass {
-    _operationClass = operationClass ?: [SDWebImageDownloaderOperation class];
+    if (operationClass && [operationClass isSubclassOfClass:[NSOperation class]] && [operationClass conformsToProtocol:@protocol(SDWebImageDownloaderOperationInterface)]) {
+        _operationClass = operationClass;
+    } else {
+        _operationClass = [SDWebImageDownloaderOperation class];
+    }
 }
 
 - (nullable SDWebImageDownloadToken *)downloadImageWithURL:(nullable NSURL *)url
@@ -145,7 +153,17 @@
         }
 
         // In order to prevent from potential duplicate caching (NSURLCache + SDImageCache) we disable the cache for image requests if told otherwise
-        NSMutableURLRequest *request = [[NSMutableURLRequest alloc] initWithURL:url cachePolicy:(options & SDWebImageDownloaderUseNSURLCache ? NSURLRequestUseProtocolCachePolicy : NSURLRequestReloadIgnoringLocalCacheData) timeoutInterval:timeoutInterval];
+        NSURLRequestCachePolicy cachePolicy = NSURLRequestReloadIgnoringLocalCacheData;
+        if (options & SDWebImageDownloaderUseNSURLCache) {
+            if (options & SDWebImageDownloaderIgnoreCachedResponse) {
+                cachePolicy = NSURLRequestReturnCacheDataDontLoad;
+            } else {
+                cachePolicy = NSURLRequestUseProtocolCachePolicy;
+            }
+        }
+        
+        NSMutableURLRequest *request = [[NSMutableURLRequest alloc] initWithURL:url cachePolicy:cachePolicy timeoutInterval:timeoutInterval];
+        
         request.HTTPShouldHandleCookies = (options & SDWebImageDownloaderHandleCookies);
         request.HTTPShouldUsePipelining = YES;
         if (sself.headersFilter) {
@@ -289,6 +307,11 @@ didReceiveResponse:(NSURLResponse *)response
     SDWebImageDownloaderOperation *dataOperation = [self operationWithTask:task];
 
     [dataOperation URLSession:session task:task didCompleteWithError:error];
+}
+
+- (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task willPerformHTTPRedirection:(NSHTTPURLResponse *)response newRequest:(NSURLRequest *)request completionHandler:(void (^)(NSURLRequest * _Nullable))completionHandler {
+    
+    completionHandler(request);
 }
 
 - (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task didReceiveChallenge:(NSURLAuthenticationChallenge *)challenge completionHandler:(void (^)(NSURLSessionAuthChallengeDisposition disposition, NSURLCredential *credential))completionHandler {

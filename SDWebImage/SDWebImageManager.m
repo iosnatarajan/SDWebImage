@@ -8,6 +8,7 @@
 
 #import "SDWebImageManager.h"
 #import <objc/message.h>
+#import "NSImage+WebCache.h"
 
 @interface SDWebImageCombinedOperation : NSObject <SDWebImageOperation>
 
@@ -28,7 +29,7 @@
 
 @implementation SDWebImageManager
 
-+ (nonnull SDWebImageManager*)sharedManager {
++ (nonnull instancetype)sharedManager {
     static dispatch_once_t once;
     static id instance;
     dispatch_once(&once, ^{
@@ -63,17 +64,6 @@
     } else {
         return url.absoluteString;
     }
-}
-
-- (BOOL)cachedImageExistsForURL:(nullable NSURL *)url {
-    NSString *key = [self cacheKeyForURL:url];
-    if ([self.imageCache imageFromMemoryCacheForKey:key] != nil) return YES;
-    return [self.imageCache diskImageExistsWithKey:key];
-}
-
-- (BOOL)diskImageExistsForURL:(nullable NSURL *)url {
-    NSString *key = [self cacheKeyForURL:url];
-    return [self.imageCache diskImageExistsWithKey:key];
 }
 
 - (void)cachedImageExistsForURL:(nullable NSURL *)url
@@ -119,7 +109,7 @@
     // Invoking this method without a completedBlock is pointless
     NSAssert(completedBlock != nil, @"If you mean to prefetch the image, use -[SDWebImagePrefetcher prefetchURLs] instead");
 
-    // Very common mistake is to send the URL using NSString object instead of NSURL. For some strange reason, XCode won't
+    // Very common mistake is to send the URL using NSString object instead of NSURL. For some strange reason, Xcode won't
     // throw any warning for this type mismatch. Here we failsafe this error by allowing URLs to be passed as NSString.
     if ([url isKindOfClass:NSString.class]) {
         url = [NSURL URLWithString:(NSString *)url];
@@ -141,10 +131,7 @@
     }
 
     if (url.absoluteString.length == 0 || (!(options & SDWebImageRetryFailed) && isFailedUrl)) {
-        dispatch_main_sync_safe(^{
-            NSError *error = [NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorFileDoesNotExist userInfo:nil];
-            completedBlock(nil, nil, error, SDImageCacheTypeNone, YES, url);
-        });
+        [self callCompletionBlockForOperation:operation completion:completedBlock error:[NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorFileDoesNotExist userInfo:nil] url:url];
         return operation;
     }
 
@@ -153,22 +140,17 @@
     }
     NSString *key = [self cacheKeyForURL:url];
 
-    operation.cacheOperation = [self.imageCache queryDiskCacheForKey:key done:^(UIImage *cachedImage, NSData *cachedData, SDImageCacheType cacheType) {
+    operation.cacheOperation = [self.imageCache queryCacheOperationForKey:key done:^(UIImage *cachedImage, NSData *cachedData, SDImageCacheType cacheType) {
         if (operation.isCancelled) {
-            @synchronized (self.runningOperations) {
-                [self.runningOperations removeObject:operation];
-            }
-
+            [self safelyRemoveOperationFromRunning:operation];
             return;
         }
 
         if ((!cachedImage || options & SDWebImageRefreshCached) && (![self.delegate respondsToSelector:@selector(imageManager:shouldDownloadImageForURL:)] || [self.delegate imageManager:self shouldDownloadImageForURL:url])) {
             if (cachedImage && options & SDWebImageRefreshCached) {
-                dispatch_main_sync_safe(^{
-                    // If image was found in the cache but SDWebImageRefreshCached is provided, notify about the cached image
-                    // AND try to re-download it in order to let a chance to NSURLCache to refresh it from server.
-                    completedBlock(cachedImage, cachedData, nil, cacheType, YES, url);
-                });
+                // If image was found in the cache but SDWebImageRefreshCached is provided, notify about the cached image
+                // AND try to re-download it in order to let a chance to NSURLCache to refresh it from server.
+                [self callCompletionBlockForOperation:weakOperation completion:completedBlock image:cachedImage data:cachedData error:nil cacheType:cacheType finished:YES url:url];
             }
 
             // download if no image or requested to refresh anyway, and download allowed by delegate
@@ -180,24 +162,23 @@
             if (options & SDWebImageHandleCookies) downloaderOptions |= SDWebImageDownloaderHandleCookies;
             if (options & SDWebImageAllowInvalidSSLCertificates) downloaderOptions |= SDWebImageDownloaderAllowInvalidSSLCertificates;
             if (options & SDWebImageHighPriority) downloaderOptions |= SDWebImageDownloaderHighPriority;
+            if (options & SDWebImageScaleDownLargeImages) downloaderOptions |= SDWebImageDownloaderScaleDownLargeImages;
+            
             if (cachedImage && options & SDWebImageRefreshCached) {
                 // force progressive off if image already cached but forced refreshing
                 downloaderOptions &= ~SDWebImageDownloaderProgressiveDownload;
                 // ignore image read from NSURLCache if image if cached but force refreshing
                 downloaderOptions |= SDWebImageDownloaderIgnoreCachedResponse;
             }
-            id subOperation = [self.imageDownloader downloadImageWithURL:url options:downloaderOptions progress:progressBlock completed:^(UIImage *downloadedImage, NSData *downloadedData, NSError *error, BOOL finished) {
+            
+            SDWebImageDownloadToken *subOperationToken = [self.imageDownloader downloadImageWithURL:url options:downloaderOptions progress:progressBlock completed:^(UIImage *downloadedImage, NSData *downloadedData, NSError *error, BOOL finished) {
                 __strong __typeof(weakOperation) strongOperation = weakOperation;
                 if (!strongOperation || strongOperation.isCancelled) {
                     // Do nothing if the operation was cancelled
                     // See #699 for more details
                     // if we would call the completedBlock, there could be a race condition between this block and another completedBlock for the same object, so if this one is called second, we will overwrite the new data
                 } else if (error) {
-                    dispatch_main_sync_safe(^{
-                        if (strongOperation && !strongOperation.isCancelled) {
-                            completedBlock(nil, nil, error, SDImageCacheTypeNone, finished, url);
-                        }
-                    });
+                    [self callCompletionBlockForOperation:strongOperation completion:completedBlock error:error url:url];
 
                     if (   error.code != NSURLErrorNotConnectedToInternet
                         && error.code != NSURLErrorCancelled
@@ -205,7 +186,8 @@
                         && error.code != NSURLErrorInternationalRoamingOff
                         && error.code != NSURLErrorDataNotAllowed
                         && error.code != NSURLErrorCannotFindHost
-                        && error.code != NSURLErrorCannotConnectToHost) {
+                        && error.code != NSURLErrorCannotConnectToHost
+                        && error.code != NSURLErrorNetworkConnectionLost) {
                         @synchronized (self.failedURLs) {
                             [self.failedURLs addObject:url];
                         }
@@ -228,67 +210,38 @@
 
                             if (transformedImage && finished) {
                                 BOOL imageWasTransformed = ![transformedImage isEqual:downloadedImage];
-                                [self.imageCache storeImage:transformedImage recalculateFromImage:imageWasTransformed imageData:(imageWasTransformed ? nil : downloadedData) forKey:key toDisk:cacheOnDisk];
+                                // pass nil if the image was transformed, so we can recalculate the data from the image
+                                [self.imageCache storeImage:transformedImage imageData:(imageWasTransformed ? nil : downloadedData) forKey:key toDisk:cacheOnDisk completion:nil];
                             }
-
-                            dispatch_main_sync_safe(^{
-                                if (strongOperation && !strongOperation.isCancelled) {
-                                    completedBlock(transformedImage, downloadedData, nil, SDImageCacheTypeNone, finished, url);
-                                }
-                            });
+                            
+                            [self callCompletionBlockForOperation:strongOperation completion:completedBlock image:transformedImage data:downloadedData error:nil cacheType:SDImageCacheTypeNone finished:finished url:url];
                         });
                     } else {
                         if (downloadedImage && finished) {
-                            [self.imageCache storeImage:downloadedImage recalculateFromImage:NO imageData:downloadedData forKey:key toDisk:cacheOnDisk];
+                            [self.imageCache storeImage:downloadedImage imageData:downloadedData forKey:key toDisk:cacheOnDisk completion:nil];
                         }
-
-                        dispatch_main_sync_safe(^{
-                            if (strongOperation && !strongOperation.isCancelled) {
-                                completedBlock(downloadedImage, downloadedData, nil, SDImageCacheTypeNone, finished, url);
-                            }
-                        });
+                        [self callCompletionBlockForOperation:strongOperation completion:completedBlock image:downloadedImage data:downloadedData error:nil cacheType:SDImageCacheTypeNone finished:finished url:url];
                     }
                 }
 
                 if (finished) {
-                    @synchronized (self.runningOperations) {
-                        if (strongOperation) {
-                            [self.runningOperations removeObject:strongOperation];
-                        }
-                    }
+                    [self safelyRemoveOperationFromRunning:strongOperation];
                 }
             }];
             operation.cancelBlock = ^{
-                [self.imageDownloader cancel:subOperation];
-
-                @synchronized (self.runningOperations) {
-                    __strong __typeof(weakOperation) strongOperation = weakOperation;
-                    if (strongOperation) {
-                        [self.runningOperations removeObject:strongOperation];
-                    }
-                }
+                [self.imageDownloader cancel:subOperationToken];
+                __strong __typeof(weakOperation) strongOperation = weakOperation;
+                [self safelyRemoveOperationFromRunning:strongOperation];
             };
         } else if (cachedImage) {
-            dispatch_main_sync_safe(^{
-                __strong __typeof(weakOperation) strongOperation = weakOperation;
-                if (strongOperation && !strongOperation.isCancelled) {
-                    completedBlock(cachedImage, cachedData, nil, cacheType, YES, url);
-                }
-            });
-            @synchronized (self.runningOperations) {
-                [self.runningOperations removeObject:operation];
-            }
+            __strong __typeof(weakOperation) strongOperation = weakOperation;
+            [self callCompletionBlockForOperation:strongOperation completion:completedBlock image:cachedImage data:cachedData error:nil cacheType:cacheType finished:YES url:url];
+            [self safelyRemoveOperationFromRunning:operation];
         } else {
             // Image not in cache and download disallowed by delegate
-            dispatch_main_sync_safe(^{
-                __strong __typeof(weakOperation) strongOperation = weakOperation;
-                if (strongOperation && !weakOperation.isCancelled) {
-                    completedBlock(nil, nil, nil, SDImageCacheTypeNone, YES, url);
-                }
-            });
-            @synchronized (self.runningOperations) {
-                [self.runningOperations removeObject:operation];
-            }
+            __strong __typeof(weakOperation) strongOperation = weakOperation;
+            [self callCompletionBlockForOperation:strongOperation completion:completedBlock image:nil data:nil error:nil cacheType:SDImageCacheTypeNone finished:YES url:url];
+            [self safelyRemoveOperationFromRunning:operation];
         }
     }];
 
@@ -298,7 +251,7 @@
 - (void)saveImageToCache:(nullable UIImage *)image forURL:(nullable NSURL *)url {
     if (image && url) {
         NSString *key = [self cacheKeyForURL:url];
-        [self.imageCache storeImage:image forKey:key toDisk:YES];
+        [self.imageCache storeImage:image forKey:key toDisk:YES completion:nil];
     }
 }
 
@@ -312,10 +265,40 @@
 
 - (BOOL)isRunning {
     BOOL isRunning = NO;
-    @synchronized(self.runningOperations) {
+    @synchronized (self.runningOperations) {
         isRunning = (self.runningOperations.count > 0);
     }
     return isRunning;
+}
+
+- (void)safelyRemoveOperationFromRunning:(nullable SDWebImageCombinedOperation*)operation {
+    @synchronized (self.runningOperations) {
+        if (operation) {
+            [self.runningOperations removeObject:operation];
+        }
+    }
+}
+
+- (void)callCompletionBlockForOperation:(nullable SDWebImageCombinedOperation*)operation
+                             completion:(nullable SDInternalCompletionBlock)completionBlock
+                                  error:(nullable NSError *)error
+                                    url:(nullable NSURL *)url {
+    [self callCompletionBlockForOperation:operation completion:completionBlock image:nil data:nil error:error cacheType:SDImageCacheTypeNone finished:YES url:url];
+}
+
+- (void)callCompletionBlockForOperation:(nullable SDWebImageCombinedOperation*)operation
+                             completion:(nullable SDInternalCompletionBlock)completionBlock
+                                  image:(nullable UIImage *)image
+                                   data:(nullable NSData *)data
+                                  error:(nullable NSError *)error
+                              cacheType:(SDImageCacheType)cacheType
+                               finished:(BOOL)finished
+                                    url:(nullable NSURL *)url {
+    dispatch_main_async_safe(^{
+        if (operation && !operation.isCancelled && completionBlock) {
+            completionBlock(image, data, error, cacheType, finished, url);
+        }
+    });
 }
 
 @end

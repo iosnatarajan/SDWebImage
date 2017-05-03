@@ -6,21 +6,17 @@
  * file that was distributed with this source code.
  */
 
-#import "MapKit/MapKit.h"
+#import "SDWebImageCompat.h"
+
+#if SD_UIKIT || SD_MAC
+
+#import <MapKit/MapKit.h>
 #import "SDWebImageManager.h"
 
 /**
  * Integrates SDWebImage async downloading and caching of remote images with MKAnnotationView.
  */
 @interface MKAnnotationView (WebCache)
-
-/**
- * Get the current image URL.
- *
- * Note that because of the limitations of categories this property can get out of sync
- * if you use setImage: directly.
- */
-- (nullable NSURL *)sd_imageURL;
 
 /**
  * Set the imageView `image` with an `url`.
@@ -108,9 +104,6 @@
                    options:(SDWebImageOptions)options
                  completed:(nullable SDExternalCompletionBlock)completedBlock;
 
-/**
- * Cancel the current download
- */
-- (void)sd_cancelCurrentImageLoad;
-
 @end
+
+#endif

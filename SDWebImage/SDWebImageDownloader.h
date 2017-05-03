@@ -23,14 +23,14 @@ typedef NS_OPTIONS(NSUInteger, SDWebImageDownloaderOptions) {
     /**
      * Call completion block with nil image/imageData if the image was read from NSURLCache
      * (to be combined with `SDWebImageDownloaderUseNSURLCache`).
+     * I think this option should be renamed to 'SDWebImageDownloaderUsingCachedResponseDontLoad'
      */
-
     SDWebImageDownloaderIgnoreCachedResponse = 1 << 3,
+    
     /**
      * In iOS 4+, continue the download of the image if the app goes to background. This is achieved by asking the system for
      * extra time in background to let the request finish. If the background task expires the operation will be cancelled.
      */
-
     SDWebImageDownloaderContinueInBackground = 1 << 4,
 
     /**
@@ -49,6 +49,11 @@ typedef NS_OPTIONS(NSUInteger, SDWebImageDownloaderOptions) {
      * Put the image in the high priority queue.
      */
     SDWebImageDownloaderHighPriority = 1 << 7,
+    
+    /**
+     * Scale down the image
+     */
+    SDWebImageDownloaderScaleDownLargeImages = 1 << 8,
 };
 
 typedef NS_ENUM(NSInteger, SDWebImageDownloaderExecutionOrder) {
@@ -66,7 +71,7 @@ typedef NS_ENUM(NSInteger, SDWebImageDownloaderExecutionOrder) {
 extern NSString * _Nonnull const SDWebImageDownloadStartNotification;
 extern NSString * _Nonnull const SDWebImageDownloadStopNotification;
 
-typedef void(^SDWebImageDownloaderProgressBlock)(NSInteger receivedSize, NSInteger expectedSize);
+typedef void(^SDWebImageDownloaderProgressBlock)(NSInteger receivedSize, NSInteger expectedSize, NSURL * _Nullable targetURL);
 
 typedef void(^SDWebImageDownloaderCompletedBlock)(UIImage * _Nullable image, NSData * _Nullable data, NSError * _Nullable error, BOOL finished);
 
@@ -97,6 +102,9 @@ typedef SDHTTPHeadersDictionary * _Nullable (^SDWebImageDownloaderHeadersFilterB
  */
 @property (assign, nonatomic) BOOL shouldDecompressImages;
 
+/**
+ *  The maximum number of concurrent downloads
+ */
 @property (assign, nonatomic) NSInteger maxConcurrentDownloads;
 
 /**
@@ -121,7 +129,7 @@ typedef SDHTTPHeadersDictionary * _Nullable (^SDWebImageDownloaderHeadersFilterB
  *
  *  @return global shared instance of downloader class
  */
-+ (nonnull SDWebImageDownloader *)sharedDownloader;
++ (nonnull instancetype)sharedDownloader;
 
 /**
  *  Set the default URL credential to be set for request operations.
@@ -145,6 +153,13 @@ typedef SDHTTPHeadersDictionary * _Nullable (^SDWebImageDownloaderHeadersFilterB
  * NSDictionary will be used as headers in corresponding HTTP request.
  */
 @property (nonatomic, copy, nullable) SDWebImageDownloaderHeadersFilterBlock headersFilter;
+
+/**
+ * Creates an instance of a downloader with specified session configuration.
+ * *Note*: `timeoutIntervalForRequest` is going to be overwritten.
+ * @return new instance of downloader class
+ */
+- (nonnull instancetype)initWithSessionConfiguration:(nullable NSURLSessionConfiguration *)sessionConfiguration NS_DESIGNATED_INITIALIZER;
 
 /**
  * Set a value for a HTTP header to be appended to each download HTTP request.
@@ -181,6 +196,7 @@ typedef SDHTTPHeadersDictionary * _Nullable (^SDWebImageDownloaderHeadersFilterB
  * @param url            The URL to the image to download
  * @param options        The options to be used for this download
  * @param progressBlock  A block called repeatedly while the image is downloading
+ *                       @note the progress block is executed on a background queue
  * @param completedBlock A block called once the download is completed.
  *                       If the download succeeded, the image parameter is set, in case of error,
  *                       error parameter is set with the error. The last parameter is always YES

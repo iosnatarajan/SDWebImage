@@ -7,6 +7,9 @@
  */
 
 #import "UIView+WebCacheOperation.h"
+
+#if SD_UIKIT || SD_MAC
+
 #import "objc/runtime.h"
 
 static char loadOperationKey;
@@ -28,8 +31,10 @@ typedef NSMutableDictionary<NSString *, id> SDOperationsDictionary;
 - (void)sd_setImageLoadOperation:(nullable id)operation forKey:(nullable NSString *)key {
     if (key) {
         [self sd_cancelImageLoadOperationWithKey:key];
-        SDOperationsDictionary *operationDictionary = [self operationDictionary];
-        operationDictionary[key] = operation;
+        if (operation) {
+            SDOperationsDictionary *operationDictionary = [self operationDictionary];
+            operationDictionary[key] = operation;
+        }
     }
 }
 
@@ -59,3 +64,5 @@ typedef NSMutableDictionary<NSString *, id> SDOperationsDictionary;
 }
 
 @end
+
+#endif

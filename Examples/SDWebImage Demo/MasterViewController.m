@@ -11,6 +11,7 @@
 #import "DetailViewController.h"
 #import <SDWebImage/FLAnimatedImageView.h>
 #import <SDWebImage/FLAnimatedImageView+WebCache.h>
+#import <SDWebImage/UIView+WebCache.h>
 
 
 @interface MyCustomTableViewCell : UITableViewCell
@@ -71,6 +72,9 @@
                     @"https://raw.githubusercontent.com/liyong03/YLGIFImage/master/YLGIFImageDemo/YLGIFImageDemo/joy.gif",
                     @"http://www.ioncannon.net/wp-content/uploads/2011/06/test2.webp",
                     @"http://www.ioncannon.net/wp-content/uploads/2011/06/test9.webp",
+                    @"http://littlesvr.ca/apng/images/SteamEngine.webp",
+                    @"http://littlesvr.ca/apng/images/world-cup-2014-42.webp",
+                    @"https://nr-platform.s3.amazonaws.com/uploads/platform/published_extension/branding_icon/275/AmazonS3.png",
                     nil];
 
         for (int i=0; i<100; i++) {
@@ -86,7 +90,7 @@
 - (void)flushCache
 {
     [SDWebImageManager.sharedManager.imageCache clearMemory];
-    [SDWebImageManager.sharedManager.imageCache clearDisk];
+    [SDWebImageManager.sharedManager.imageCache clearDiskOnCompletion:nil];
 }
 							
 - (BOOL)shouldAutorotateToInterfaceOrientation:(UIInterfaceOrientation)interfaceOrientation
@@ -120,8 +124,8 @@
         cell = [[MyCustomTableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:CellIdentifier];
     }
 
-    [cell.customImageView setShowActivityIndicatorView:YES];
-    [cell.customImageView setIndicatorStyle:UIActivityIndicatorViewStyleGray];
+    [cell.customImageView sd_setShowActivityIndicatorView:YES];
+    [cell.customImageView sd_setIndicatorStyle:UIActivityIndicatorViewStyleGray];
     
     cell.customTextLabel.text = [NSString stringWithFormat:@"Image #%ld", (long)indexPath.row];
     [cell.customImageView sd_setImageWithURL:[NSURL URLWithString:_objects[indexPath.row]]
